@@ -1,0 +1,117 @@
+Option B (Containerized Nginx + SSL)
+- Create the Directory
+```bash
+mkdir -p nginx/conf.d
+mkdir -p nginx/certbot/www
+mkdir -p nginx/certbot/conf
+```
+
+- Create the Config File
+Path: nginx/conf.d/default.conf
+```nginx
+server {
+    listen 80;
+    server_name example.com www.example.com;
+
+    location / {
+        proxy_pass http://frontend:80;
+    }
+
+    location /api/ {
+        proxy_pass http://backend:5000;
+    }
+
+    location ~ /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+}
+```
+
+- Update the docker-compose.yml File
+```yml
+version: '3.8'
+
+services:
+  frontend:
+    build: ./frontend
+    container_name: frontend
+    expose:
+      - "80"
+
+  backend:
+    build: ./backend
+    container_name: backend
+    expose:
+      - "5000"
+
+  nginx:
+    image: nginx:alpine
+    container_name: nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d
+      - ./nginx/certbot/www:/var/www/certbot
+      - ./nginx/certbot/conf:/etc/letsencrypt
+    depends_on:
+      - frontend
+      - backend
+
+  certbot:
+    image: certbot/certbot
+    container_name: certbot
+    volumes:
+      - ./nginx/certbot/www:/var/www/certbot
+      - ./nginx/certbot/conf:/etc/letsencrypt
+```
+
+- Start the Stack with only HTTP
+```bash
+docker-compose up -d
+```
+
+- Certbot Certificate
+```bash
+docker-compose run --rm certbot certonly --webroot \
+   --webroot-path=/var/www/certbot \
+   -d example.com -d www.example.com
+```
+
+- Update the Nginx Config with SSL
+Path: nginx/conf.d/default.conf
+server {
+    listen 80;
+    server_name example.com www.example.com;
+    location ~ /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl;
+    server_name example.com www.example.com;
+
+    ssl_certificate /etc/letsencrypt/live/example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/example.com/privkey.pem;
+
+    location / {
+        proxy_pass http://frontend:80;
+    }
+
+    location /api/ {
+        proxy_pass http://backend:5000;
+    }
+}
+- Reload the Nginx
+```bash
+docker-compose restart nginx
+```
+
+
+
+
+

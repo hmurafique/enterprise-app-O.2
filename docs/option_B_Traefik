@@ -1,0 +1,41 @@
+Option B: Containerized Nginx + SSL (All in docker-compose.yml)
+- Use Traefik (best & automatic)
+- docker-compose.yml
+```yml
+traefik:
+  image: traefik:v2.10
+  command:
+    - --providers.docker=true
+    - --entrypoints.web.address=:80
+    - --entrypoints.websecure.address=:443
+    - --certificatesresolvers.letsresolver.acme.httpchallenge.entrypoint=web
+    - --certificatesresolvers.letsresolver.acme.email=you@example.com
+    - --certificatesresolvers.letsresolver.acme.storage=/letsencrypt/acme.json
+  ports:
+    - "80:80"
+    - "443:443"
+  volumes:
+    - /var/run/docker.sock:/var/run/docker.sock:ro
+    - ./traefik/acme.json:/letsencrypt/acme.json
+```
+- Add the label each & every service (like backend)
+```yml
+labels:
+  - "traefik.enable=true"
+  - "traefik.http.routers.backend.rule=Host(`api.example.com`)"
+  - "traefik.http.routers.backend.entrypoints=websecure"
+  - "traefik.http.routers.backend.tls.certresolver=letsresolver"
+```
+- Create the acme.json file
+```bash
+mkdir -p traefik
+touch traefik/acme.json
+chmod 600 traefik/acme.json
+```
+- Start the Stack
+```bash
+docker-compose up -d --build
+docker-compose logs -f traefik
+```
+
+
