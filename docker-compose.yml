@@ -1,0 +1,109 @@
+version: '3.8'
+services:
+  postgres:
+    image: postgres:15
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - backnet
+
+  redis:
+    image: redis:7
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    networks:
+      - backnet
+
+  backend-node:
+    build: ./backend-node
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      - postgres
+      - redis
+    environment:
+      - PORT=${NODE_PORT}
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      - REDIS_URL=redis://redis:6379
+    ports:
+      - "${NODE_PORT}:${NODE_PORT}"
+    networks:
+      - backnet
+      - webproxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.backend-node.rule=Host(`api.${DOMAIN}`)"
+      - "traefik.http.routers.backend-node.entrypoints=websecure"
+      - "traefik.http.routers.backend-node.tls=true"
+      - "traefik.http.routers.backend-node.tls.certresolver=letsresolver"
+
+  backend-python:
+    build: ./backend-python
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      - postgres
+      - redis
+    environment:
+      - PORT=${PYTHON_PORT}
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      - REDIS_URL=redis://redis:6379
+    ports:
+      - "${PYTHON_PORT}:${PYTHON_PORT}"
+    networks:
+      - backnet
+      - webproxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.backend-python.rule=Host(`micro.${DOMAIN}`)"
+      - "traefik.http.routers.backend-python.entrypoints=websecure"
+      - "traefik.http.routers.backend-python.tls=true"
+      - "traefik.http.routers.backend-python.tls.certresolver=letsresolver"
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    environment:
+      - VITE_API_URL=https://api.${DOMAIN}
+    ports:
+      - "${FRONTEND_PORT}:80"
+    networks:
+      - webproxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.frontend.rule=Host(`www.${DOMAIN}`)"
+      - "traefik.http.routers.frontend.entrypoints=websecure"
+      - "traefik.http.routers.frontend.tls=true"
+      - "traefik.http.routers.frontend.tls.certresolver=letsresolver"
+
+  traefik:
+    image: traefik:v2.10
+    command:
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      - --api.insecure=true
+      - --certificatesresolvers.letsresolver.acme.httpchallenge.entrypoint=web
+      - --certificatesresolvers.letsresolver.acme.email=${EMAIL}
+      - --certificatesresolvers.letsresolver.acme.storage=/letsencrypt/acme.json
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/acme.json:/letsencrypt/acme.json
+    networks:
+      - webproxy
+
+volumes:
+  pgdata:
+
+networks:
+  backnet:
+  webproxy:
